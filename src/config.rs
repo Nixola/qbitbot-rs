@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use config::Map;
 
 use crate::Args;
 
