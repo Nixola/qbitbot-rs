@@ -1,8 +1,10 @@
-use anyhow::{bail, Context, Result};
-use teloxide::{prelude::*, types::User};
+use std::sync::Mutex;
+use std::sync::Arc;
+use anyhow::{Context, Result};
+use teloxide::prelude::*;
 use teloxide::types::MediaKind::{Text,Document};
-use teloxide::types::MessageKind::Common;
-use clap::{Parser, Command};
+use teloxide::types::MessageKind::{Common,ForumTopicCreated};
+use clap::Parser;
 use qbit_rs::Qbit;
 use qbit_rs::model::Credential;
 
@@ -29,10 +31,11 @@ async fn main() -> Result<(), Error> {
 
     let bot = Bot::new(config.token);
 
-    let qbit = Qbit::new(config.host.as_str(), Credential::new(config.username, config.password));
-    println!("{:?}", config.map);
+    let _qbit = Qbit::new(config.host.as_str(), Credential::new(config.username, config.password));
 
-    teloxide::repl(bot, move |bot: Bot, msg: Message| async move {
+    teloxide::repl(bot, |_bot: Bot, msg: Message| async {
+        let _qbit = _qbit.clone();
+        //let _qbit = _qbit;
         println!("{:#?}",msg);
         if let Some(ref user) = msg.from {
             if user.id != UserId(config.user_id.try_into().unwrap()) {
@@ -42,17 +45,23 @@ async fn main() -> Result<(), Error> {
             return Ok(())
         }
 
-        match msg.kind {
-            Common(m) => match m.media_kind {
+        if let Some(r) = msg.reply_to_message() {
+            if let ForumTopicCreated(t) = &r.kind {
+                let _category = &t.forum_topic_created.name;
+                //_qbit.get_categories();
+            }
+        }
+
+        if let Common(m) = msg.kind {
+            match m.media_kind {
                 Text(t) => {
-                    parse_magnets(bot, msg.from.unwrap(), t.text);
+                    let _links = parse_magnets(t.text);
                 },
-                Document(d) => {
+                Document(_d) => {
                     println!("The hell do I do with this?");
                 }
                 _ => println!("I dunno inner"),
-            },
-            _ => println!("I dunno outer"),
+            }
         }
         Ok(())
     })
@@ -61,25 +70,9 @@ async fn main() -> Result<(), Error> {
 }
 
 /// Replies to the user's text messages
-async fn parse_magnets(bot: Bot, user: User, message_text: String) -> Result<(), Error> {
-    /*
-       The id of a chat with a user is the same as his telegram_id
-       from the bot's perspective.
-
-       Injected dependencies:
-       - Bot is provided by the Dispatcher::dispatch
-       - User is provided by the (1)
-       - String is provided by the (2)
-    */
-    let links = message_text.lines()
-        .filter(|line| line.starts_with("magnet:"));
-
-    let count = links.count();
-
-    if count > 0 {
-        println!("{}",count);
-    }
-    
-    //bot.send_message(user.id, format!("Hi! You sent: {message_text}")).send().await;
-    Ok(())
+async fn parse_magnets(message_text: String) -> Vec<String> {
+    message_text.lines()
+        .filter(|line| line.starts_with("magnet:"))
+        .map(String::from)
+        .collect()
 }
