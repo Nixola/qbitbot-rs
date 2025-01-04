@@ -1,6 +1,4 @@
-use std::sync::Mutex;
-use std::sync::Arc;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use teloxide::prelude::*;
 use teloxide::types::MediaKind::{Text,Document};
 use teloxide::types::MessageKind::{Common,ForumTopicCreated};
@@ -27,18 +25,18 @@ pub struct Args {
 async fn main() -> Result<(), Error> {
 
     let args = Args::parse();
-    let config = load_config(&args).await.context("Failed to load config")?;
+    let config = load_config(&args).unwrap();
 
     let bot = Bot::new(config.token);
 
-    let _qbit = Qbit::new(config.host.as_str(), Credential::new(config.username, config.password));
+    let _qbit = Qbit::new(config.host, Credential::new(config.username, config.password));
+
 
     teloxide::repl(bot, |_bot: Bot, msg: Message| async {
         let _qbit = _qbit.clone();
-        //let _qbit = _qbit;
         println!("{:#?}",msg);
         if let Some(ref user) = msg.from {
-            if user.id != UserId(config.user_id.try_into().unwrap()) {
+            if user.id != UserId(config.user_id) {
                 return Ok(())
             }
         } else {
@@ -47,8 +45,9 @@ async fn main() -> Result<(), Error> {
 
         if let Some(r) = msg.reply_to_message() {
             if let ForumTopicCreated(t) = &r.kind {
+                println!("Hi");
                 let _category = &t.forum_topic_created.name;
-                //_qbit.get_categories();
+                _qbit.get_categories();
             }
         }
 
