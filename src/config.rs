@@ -24,7 +24,7 @@ pub struct Config<'a> {
     pub host: &'a str,
 }
 
-pub fn load_config(args: &Args) -> Result<Config> {
+pub fn load_config(args: Args) -> Result<Config<'static>> {
     let mut config = config::Config::builder();
 
     // /etc/qbitbot/config.toml

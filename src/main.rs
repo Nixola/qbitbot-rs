@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 use anyhow::Result;
 use teloxide::prelude::*;
 use teloxide::types::MediaKind::{Text,Document};
@@ -5,6 +6,7 @@ use teloxide::types::MessageKind::{Common,ForumTopicCreated};
 use clap::Parser;
 use qbit_rs::Qbit;
 use qbit_rs::model::Credential;
+use config::Config;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -20,20 +22,28 @@ pub struct Args {
     pub config: Option<String>,
 }
 
+fn config() -> &'static Config<'static> {
+    static CONFIG: OnceLock<Config> = OnceLock::new();
+    CONFIG.get_or_init(|| {
+        let args = Args::parse();
+        let config = load_config(args).expect("Failed to load config");
+        config
+    })
+}
+
+fn qbit() -> &'static Qbit {
+    static QBIT: OnceLock<Qbit> = OnceLock::new();
+    QBIT.get_or_init(|| {
+        Qbit::new(config().host, Credential::new(config().username, config().password))
+    })
+} 
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-
-    let args = Args::parse();
-    let config = load_config(&args).unwrap();
-
+    let config = config();
     let bot = Bot::new(config.token);
 
-    let _qbit = Qbit::new(config.host, Credential::new(config.username, config.password));
-
-
     teloxide::repl(bot, |_bot: Bot, msg: Message| async {
-        let _qbit = _qbit.clone();
         println!("{:#?}",msg);
         if let Some(ref user) = msg.from {
             if user.id != UserId(config.user_id) {
@@ -47,7 +57,7 @@ async fn main() -> Result<(), Error> {
             if let ForumTopicCreated(t) = &r.kind {
                 println!("Hi");
                 let _category = &t.forum_topic_created.name;
-                _qbit.get_categories();
+                qbit().get_categories();
             }
         }
 
