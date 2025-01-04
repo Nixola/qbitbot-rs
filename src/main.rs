@@ -23,46 +23,49 @@ pub struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-
     let args = Args::parse();
     let config = load_config(&args).unwrap();
 
     let bot = Bot::new(config.token);
 
-    let _qbit = Qbit::new(config.host, Credential::new(config.username, config.password));
+    let qbit: &'static _ = Box::leak(Box::new(Qbit::new(
+        config.host,
+        Credential::new(config.username, config.password),
+    )));
 
-
-    teloxide::repl(bot, |_bot: Bot, msg: Message| async {
-        let _qbit = _qbit.clone();
-        println!("{:#?}",msg);
-        if let Some(ref user) = msg.from {
-            if user.id != UserId(config.user_id) {
-                return Ok(())
-            }
-        } else {
-            return Ok(())
-        }
-
-        if let Some(r) = msg.reply_to_message() {
-            if let ForumTopicCreated(t) = &r.kind {
-                println!("Hi");
-                let _category = &t.forum_topic_created.name;
-                _qbit.get_categories();
-            }
-        }
-
-        if let Common(m) = msg.kind {
-            match m.media_kind {
-                Text(t) => {
-                    let _links = parse_magnets(t.text);
-                },
-                Document(_d) => {
-                    println!("The hell do I do with this?");
+    teloxide::repl(bot, move |_bot: Bot, msg: Message| {
+        let qbit = qbit.clone();
+        async move {
+            println!("{:#?}", msg);
+            if let Some(ref user) = msg.from {
+                if user.id != UserId(config.user_id) {
+                    return Ok(());
                 }
-                _ => println!("I dunno inner"),
+            } else {
+                return Ok(());
             }
+
+            if let Some(r) = msg.reply_to_message() {
+                if let ForumTopicCreated(t) = &r.kind {
+                    println!("Hi");
+                    let _category = &t.forum_topic_created.name;
+                    let categories = qbit.get_categories().await;
+                }
+            }
+
+            if let Common(m) = msg.kind {
+                match m.media_kind {
+                    Text(t) => {
+                        let _links = parse_magnets(t.text);
+                    }
+                    Document(_d) => {
+                        println!("The hell do I do with this?");
+                    }
+                    _ => println!("I dunno inner"),
+                }
+            }
+            Ok(())
         }
-        Ok(())
     })
     .await;
     Ok(())
