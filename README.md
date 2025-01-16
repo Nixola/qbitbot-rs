@@ -1,7 +1,7 @@
 Hermes
 ======
 
-A Telegram bot to add torrent files to a qBittorrent instance. Why? Hell if I know, I thought it'd be handy to use and fun to make.
+A Telegram bot to add torrent files and links to a qBittorrent instance. Why? Hell if I know, I thought it'd be handy to use and fun to make.
 
 Installation
 ------------
@@ -48,7 +48,9 @@ QBITBOT_HOST=""
 Usage
 -----
 
-Just run the thing.
+Create or edit your bot in Botfather disabling group privacy mode, then add the bot to a group chat. Enable topics in said group chat, and create a topic (sending a message as well) for each category you want to be able to add torrents to. The bot supports both torrent files and magnet links, and other links probably work as well.
+
+After that, get the bot running!
 ```bash
 $ qbitbot
 ```
