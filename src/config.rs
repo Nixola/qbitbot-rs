@@ -4,9 +4,9 @@ use serde::Deserialize;
 use crate::Args;
 
 #[derive(Deserialize)]
-pub struct Config<'a> {
+pub struct Config {
     /// Telegram bot token
-    pub token: &'a str,
+    pub token: String,
 
     /// Telegram owner user ID
     pub user_id: u64,
@@ -15,16 +15,16 @@ pub struct Config<'a> {
     pub chat_id: i64,
 
     /// Qbittorrent username
-    pub username: &'a str,
+    pub username: String,
 
     /// Qbittorrent password
-    pub password: &'a str,
+    pub password: String,
 
     /// Qbittorrent url
-    pub host: &'a str,
+    pub host: String,
 }
 
-pub fn load_config(args: &Args) -> Result<Config> {
+pub fn load_config(args: Args) -> Result<Config> {
     let mut config = config::Config::builder();
 
     // /etc/qbitbot/config.toml

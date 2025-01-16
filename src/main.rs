@@ -1,10 +1,15 @@
 use anyhow::Result;
-use teloxide::prelude::*;
-use teloxide::types::MediaKind::{Text,Document};
-use teloxide::types::MessageKind::{Common,ForumTopicCreated};
 use clap::Parser;
+use crate::config::Config;
 use qbit_rs::Qbit;
-use qbit_rs::model::Credential;
+use qbit_rs::model::{AddTorrentArg, Credential, TorrentFile, TorrentSource};
+use std::sync::Arc;
+use teloxide::net::Download;
+use teloxide::prelude::*;
+use teloxide::types::MediaKind::{Text, Document};
+use teloxide::types::MessageKind::{Common, ForumTopicCreated};
+use teloxide::types::ReplyParameters;
+use url::Url;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -20,58 +25,135 @@ pub struct Args {
     pub config: Option<String>,
 }
 
-
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-
     let args = Args::parse();
-    let config = load_config(&args).unwrap();
+    let config = Arc::new(load_config(args).expect("Failed to load config"));
+    let qbit = Arc::new(Qbit::new(config.host.as_str(), Credential::new(config.username.as_str(), config.password.as_str())));
+    let bot = Bot::new(config.token.as_str());
 
-    let bot = Bot::new(config.token);
-
-    let _qbit = Qbit::new(config.host, Credential::new(config.username, config.password));
-
-
-    teloxide::repl(bot, |_bot: Bot, msg: Message| async {
-        let _qbit = _qbit.clone();
-        println!("{:#?}",msg);
-        if let Some(ref user) = msg.from {
+    let handler = Update::filter_message().endpoint(
+        |bot: Bot, qbit: Arc<Qbit>, config: Arc<Config>, msg: Message| async move {
+            
+            // Ignore messages from any user other than the one in the configuration
+            let Some(ref user) = msg.from else {
+                return respond(());
+            };
             if user.id != UserId(config.user_id) {
-                return Ok(())
+                return respond(());
             }
-        } else {
-            return Ok(())
-        }
 
-        if let Some(r) = msg.reply_to_message() {
-            if let ForumTopicCreated(t) = &r.kind {
-                println!("Hi");
-                let _category = &t.forum_topic_created.name;
-                _qbit.get_categories();
-            }
-        }
+            // Evaluate the incoming message for magnet links (if text) or torrent files (if document)
+            let source =
+            // Honestly, I'm not entirely sure what I'm doing here, but I think I have to?
+            if let Common(ref m) = msg.kind {
+                match &m.media_kind {
+                    // Parse magnet links
+                    Text(t) => {
+                        let links = parse_magnets(t.text.clone()).await;
+                        // Abort if no links are present
+                        if links.is_empty() { return respond(()) };
+                        TorrentSource::Urls {urls: links.into()}
+                    },
+                    // Apparently, there's only one document per message? Multiple attachments are sent as multiple messages as far as I can tell
+                    Document(d) => {
+                        // Reject non-torrent files, and ones without a mimetype
+                        let Some(ref mime_type) = &d.document.mime_type else { return respond(()) };
+                        if *mime_type != "application/x-bittorrent".parse::<mime::Mime>().unwrap() {
+                            return respond(())
+                        }
+                        
+                        // Reject nameless files. Can this even happen?
+                        let file_name = match &d.document.file_name {
+                            Some(n) => n,
+                            None => return respond(()),
+                        };
 
-        if let Common(m) = msg.kind {
-            match m.media_kind {
-                Text(t) => {
-                    let _links = parse_magnets(t.text);
-                },
-                Document(_d) => {
-                    println!("The hell do I do with this?");
+                        // Download the file from Telegram
+                        let file_path = bot.get_file(&d.document.file.id).await?;
+                        let mut file_contents: Vec<u8> = Vec::new();
+                        match bot.download_file(&file_path.path, &mut file_contents).await {
+                            Ok(()) => {
+                                
+                            },
+                            Err(e) => {
+                                // Warn the user, then abort
+                                bot.send_message(msg.chat.id, format!("Couldn't download file, please retry\n```{:#?}```", e))
+                                    .reply_parameters(ReplyParameters::new(msg.id))
+                                    .await?;
+                                return respond(())
+                            },
+                        }
+
+                        // qbittorrent wants both filename and file content
+                        let torrent_file = TorrentFile {filename: file_name.to_string(), data: file_contents};
+                        TorrentSource::TorrentFiles {torrents: vec![torrent_file]}
+                    },
+                    // Ignore anything that's not a text or document message
+                    _ => return respond(())
                 }
-                _ => println!("I dunno inner"),
+            } else {
+                return respond(());
+            };
+
+            // Get the category from the topic name, which can be retrieved from the message this message is replying to
+            // Note: replying to a message prevents this from working, I'd need to go up the chain and I'm not bothering
+            // Note: renaming the topic won't work, as the ForumTopicCreated still contains the original name! Recreate it!
+            let category = if let Some(r) = msg.reply_to_message() {
+                if let ForumTopicCreated(t) = &r.kind {
+                    // Get the category list from qbittorrent, abort if nonexistent
+                    let categories = qbit.get_categories().await.ok().unwrap();
+                    match categories.get(&t.forum_topic_created.name) {
+                        Some(category) => {
+                            category.name.clone()
+                        },
+                        None => {
+                            return respond(())
+                        }
+                    }
+                // If the message is a reply, ignore it
+                } else {
+                    return respond(())
+                }
+            // If the message isn't in a topic, ignore it
+            } else {
+                return respond(())
+            };
+
+            let add_torrent_arg = AddTorrentArg::builder()
+                .source(source)
+                .category(category)
+                .auto_torrent_management(true)
+                .build();
+            match qbit.add_torrent(add_torrent_arg).await {
+                Ok(()) => {
+                },
+                Err(e) => {
+                    bot.send_message(msg.chat.id, format!("Couldn't add torrent\n{:#?}", e))
+                        .reply_parameters(ReplyParameters::new(msg.id))
+                        .await?;
+
+                }
             }
-        }
-        Ok(())
-    })
-    .await;
+
+            respond(())
+        },
+    );
+
+    Dispatcher::builder(bot, handler)
+        .dependencies(dptree::deps![qbit,config])
+        .enable_ctrlc_handler()
+        .build()
+        .dispatch()
+        .await;
     Ok(())
 }
 
-/// Replies to the user's text messages
-async fn parse_magnets(message_text: String) -> Vec<String> {
+// Parse a string so as to extract lines that form valid URLs
+async fn parse_magnets(message_text: String) -> Vec<Url> {
     message_text.lines()
-        .filter(|line| line.starts_with("magnet:"))
-        .map(String::from)
+        .map(Url::parse)
+        .filter(|url| { url.clone().ok().is_some() })
+        .map(|url| url.unwrap())
         .collect()
 }
