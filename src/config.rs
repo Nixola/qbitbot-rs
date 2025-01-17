@@ -11,9 +11,6 @@ pub struct Config {
     /// Telegram owner user ID
     pub user_id: u64,
 
-    /// Telegram chat id
-    pub chat_id: i64,
-
     /// Qbittorrent username
     pub username: String,
 
