@@ -25,8 +25,6 @@ Put a `config.toml` in a config directory such as `~/.config/qbitbot/` or `/etc/
 token = ""
 # Telegram user ID. Messages sent by any other user are ignored.
 user_id = 1
-# Chat ID. Currently ignored. I should probably delete it.
-chat_id = 2
 # qBittorrent webui/api username, in quotes.
 username = ""
 # qBittorrent webui/api password, in quotes.
@@ -39,7 +37,6 @@ Alternatively, the following environment variables have the same effect and take
 ```shell
 QBITBOT_TOKEN=""
 QBITBOT_USER_ID=1
-QBITBOT_CHAT_ID=2
 QBITBOT_USERNAME=""
 QBITBOT_PASSWORD=""
 QBITBOT_HOST=""
