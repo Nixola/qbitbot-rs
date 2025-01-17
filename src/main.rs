@@ -1,12 +1,12 @@
+use crate::config::Config;
 use anyhow::Result;
 use clap::Parser;
-use crate::config::Config;
-use qbit_rs::Qbit;
 use qbit_rs::model::{AddTorrentArg, Credential, TorrentFile, TorrentSource};
+use qbit_rs::Qbit;
 use std::sync::Arc;
 use teloxide::net::Download;
 use teloxide::prelude::*;
-use teloxide::types::MediaKind::{Text, Document};
+use teloxide::types::MediaKind::{Document, Text};
 use teloxide::types::MessageKind::{Common, ForumTopicCreated};
 use teloxide::types::ReplyParameters;
 use url::Url;
@@ -29,12 +29,15 @@ pub struct Args {
 async fn main() -> Result<(), Error> {
     let args = Args::parse();
     let config = Arc::new(load_config(args).expect("Failed to load config"));
-    let qbit = Arc::new(Qbit::new(config.host.as_str(), Credential::new(config.username.as_str(), config.password.as_str())));
-    let bot = Bot::new(config.token.as_str());
+    let qbit = Arc::new(Qbit::new(
+        Url::parse(&config.host).expect("Invalid qBittorrent URL provided"),
+        Credential::new(&config.username, &config.password),
+    ));
+    let bot = Bot::new(&config.token);
 
     let handler = Update::filter_message().endpoint(
         |bot: Bot, qbit: Arc<Qbit>, config: Arc<Config>, msg: Message| async move {
-            
+
             // Ignore messages from any user other than the one in the configuration
             let Some(ref user) = msg.from else {
                 return respond(());
@@ -50,7 +53,7 @@ async fn main() -> Result<(), Error> {
                 match &m.media_kind {
                     // Parse magnet links
                     Text(t) => {
-                        let links = parse_magnets(t.text.clone()).await;
+                        let links = parse_magnets(&t.text).await;
                         // Abort if no links are present
                         if links.is_empty() { return respond(()) };
                         TorrentSource::Urls {urls: links.into()}
@@ -62,7 +65,7 @@ async fn main() -> Result<(), Error> {
                         if *mime_type != "application/x-bittorrent".parse::<mime::Mime>().unwrap() {
                             return respond(())
                         }
-                        
+
                         // Reject nameless files. Can this even happen?
                         let file_name = match &d.document.file_name {
                             Some(n) => n,
@@ -72,17 +75,12 @@ async fn main() -> Result<(), Error> {
                         // Download the file from Telegram
                         let file_path = bot.get_file(&d.document.file.id).await?;
                         let mut file_contents: Vec<u8> = Vec::new();
-                        match bot.download_file(&file_path.path, &mut file_contents).await {
-                            Ok(()) => {
-                                
-                            },
-                            Err(e) => {
-                                // Warn the user, then abort
-                                bot.send_message(msg.chat.id, format!("Couldn't download file, please retry\n```{:#?}```", e))
-                                    .reply_parameters(ReplyParameters::new(msg.id))
-                                    .await?;
-                                return respond(())
-                            },
+                        if let Err(e) = bot.download_file(&file_path.path, &mut file_contents).await {
+                            // Warn the user, then abort
+                            bot.send_message(msg.chat.id, format!("Couldn't download file, please retry\n```{:#?}```", e))
+                                .reply_parameters(ReplyParameters::new(msg.id))
+                                .await?;
+                            return respond(())
                         }
 
                         // qbittorrent wants both filename and file content
@@ -125,15 +123,10 @@ async fn main() -> Result<(), Error> {
                 .category(category)
                 .auto_torrent_management(true)
                 .build();
-            match qbit.add_torrent(add_torrent_arg).await {
-                Ok(()) => {
-                },
-                Err(e) => {
-                    bot.send_message(msg.chat.id, format!("Couldn't add torrent\n{:#?}", e))
-                        .reply_parameters(ReplyParameters::new(msg.id))
-                        .await?;
-
-                }
+            if let Err(e) = qbit.add_torrent(add_torrent_arg).await {
+                bot.send_message(msg.chat.id, format!("Couldn't add torrent\n{:#?}", e))
+                    .reply_parameters(ReplyParameters::new(msg.id))
+                    .await?;
             }
 
             respond(())
@@ -141,7 +134,7 @@ async fn main() -> Result<(), Error> {
     );
 
     Dispatcher::builder(bot, handler)
-        .dependencies(dptree::deps![qbit,config])
+        .dependencies(dptree::deps![qbit, config])
         .enable_ctrlc_handler()
         .build()
         .dispatch()
@@ -150,10 +143,11 @@ async fn main() -> Result<(), Error> {
 }
 
 // Parse a string so as to extract lines that form valid URLs
-async fn parse_magnets(message_text: String) -> Vec<Url> {
-    message_text.lines()
+async fn parse_magnets(message_text: &str) -> Vec<Url> {
+    message_text
+        .lines()
         .map(Url::parse)
-        .filter(|url| { url.clone().ok().is_some() })
+        .filter(|url| url.clone().ok().is_some())
         .map(|url| url.unwrap())
         .collect()
 }
