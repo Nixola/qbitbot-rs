@@ -1,4 +1,4 @@
-Hermes
+qbitbot-rs
 ======
 
 A Telegram bot to add torrent files and links to a qBittorrent instance. Why? Hell if I know, I thought it'd be handy to use and fun to make.
